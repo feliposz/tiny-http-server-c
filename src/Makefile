@@ -1,10 +1,13 @@
 CC = gcc
-CFLAGS = -Wall -g -std=c11 -D_POSIX_C_SOURCE=200112L
+CFLAGS = -Wall -g -std=c11
 
 all: tiny
 
-tiny: tiny.c
-	$(CC) $(CFLAGS) -o tiny tiny.c
+mynetlib.o: mynetlib.c mynetlib.h
+	$(CC) $(CFLAGS) -c mynetlib.c
+
+tiny: tiny.c mynetlib.o
+	$(CC) $(CFLAGS) -o tiny tiny.c mynetlib.o
 
 clean:
 	rm -f tiny *.o
