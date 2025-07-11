@@ -50,7 +50,7 @@ void errorResponse(int client, int statusCode, char *shortMessage, char *longMes
     sendBytes(client, buf, strlen(buf));
     if (longMessage != NULL)
     {
-        snprintf(buf, MAXLINE, "Content-Length: %zu\r\n", strlen(longMessage));
+        snprintf(buf, MAXLINE, "Content-Length: %zu\r\n\r\n", strlen(longMessage));
         sendBytes(client, buf, strlen(buf));
         sendBytes(client, longMessage, strlen(longMessage));
     }
@@ -58,7 +58,7 @@ void errorResponse(int client, int statusCode, char *shortMessage, char *longMes
     {
         char defaultMessage[MAXLINE];
         snprintf(defaultMessage, MAXLINE, "%d %s", statusCode, shortMessage);
-        snprintf(buf, MAXLINE, "Content-Length: %zu\r\n", strlen(defaultMessage));
+        snprintf(buf, MAXLINE, "Content-Length: %zu\r\n\r\n", strlen(defaultMessage));
         sendBytes(client, buf, strlen(buf));
         sendBytes(client, defaultMessage, strlen(defaultMessage));
     }
