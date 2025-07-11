@@ -14,29 +14,49 @@
 #define MAXHOST 100
 #define MAXPORT 100
 
-void handleClient(int client)
+void readRequestHeaders(buffered_reader_t *pbr)
 {
-    char line[MAXLINE];
-    buffered_reader_t br;
-    bufReaderInit(&br, client);
-    while (1)
+    char headerLine[MAXLINE];
+    for (int i = 0;; i++)
     {
-        ssize_t length = bufReadLine(&br, line, MAXLINE);
+        ssize_t length = bufReadLine(pbr, headerLine, MAXLINE);
         if (length == -1)
         {
-            perror("receiveLine");
+            perror("bufReadLine");
+            break;
         }
         else if (length == 0)
         {
             printf("client closed connection\n");
             break;
         }
-        printf("received %ld bytes: %.*s", length, (int)length, line);
-        if (strncmp(line, "\r\n", length) == 0)
+        if (strncmp(headerLine, "\r\n", length) == 0)
         {
             break;
         }
+        printf("Header #%d: %.*s", i, (int)length, headerLine);
     }
+}
+
+void handleClient(int client)
+{
+    char reqLine[MAXLINE], method[MAXLINE], url[MAXLINE], version[MAXLINE];
+    buffered_reader_t br;
+    bufReaderInit(&br, client);
+    ssize_t reqLineLength = bufReadLine(&br, reqLine, MAXLINE);
+    if (reqLineLength == -1)
+    {
+        perror("bufReadLine");
+        return;
+    }
+    else if (reqLineLength == 0)
+    {
+        printf("client closed connection\n");
+        return;
+    }
+    sscanf(reqLine, "%s %s %s", method, url, version);
+    printf("Request - Method: %s URL: %s Version: %s\n", method, url, version);
+    readRequestHeaders(&br);
 }
 
 int main(int argc, char *argv[])
