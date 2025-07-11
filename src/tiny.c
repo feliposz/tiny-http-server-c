@@ -10,6 +10,7 @@
 #include <linux/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netdb.h>
 #include "mynetlib.h"
 
@@ -20,6 +21,7 @@
 #define BASEDIR "./wwwroot"
 #define DEFAULT_FILENAME "index.html"
 
+extern char **environ;
 int verbose = 0;
 
 void readRequestHeaders(buffered_reader_t *pbr)
@@ -173,6 +175,59 @@ void serveStatic(int client, char *path)
     free(content);
 }
 
+void serveDynamic(int client, char *path, char *args)
+{
+    printf("serving dynamic resource: %s with args: %s\n", path, args);
+    if (checkResourcePermission(client, path, S_IXUSR) != 0)
+    {
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == -1)
+    {
+        perror("fork");
+        errorResponse(client, 500, "Internal Server Error", NULL);
+        return;
+    }
+
+    char buf[MAXLINE];
+    snprintf(buf, MAXLINE, "HTTP/1.1 200 OK\r\n");
+    sendBytes(client, buf, strlen(buf));
+
+    if (pid == 0) // child
+    {
+        char *empty[] = {NULL};
+        dup2(client, STDOUT_FILENO);
+        setenv("QUERY_STRING", args, 1);
+        execve(path, empty, environ);
+        perror("fork"); // shouldn't return
+        return;
+    }
+    else
+    {
+        int status;
+        if (waitpid(pid, &status, 0) < 0)
+        {
+            perror("waitpid");
+            errorResponse(client, 500, "Internal Server Error", NULL);
+            return;
+        }
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
+        {
+            printf("exit status=%d\n", WEXITSTATUS(status));
+            errorResponse(client, 500, "Internal Server Error", NULL);
+            return;
+        }
+        if (WIFSIGNALED(status))
+        {
+            printf("terminated by signal=%d\n", WTERMSIG(status));
+            errorResponse(client, 500, "Internal Server Error", NULL);
+            return;
+        }
+    }
+}
+
 void handleClient(int client)
 {
     char reqLine[MAXLINE];
@@ -218,7 +273,7 @@ void handleClient(int client)
     }
     else
     {
-        errorResponse(client, 501, "Not Implemented", "server under development");
+        serveDynamic(client, path, args);
     }
 }
 
