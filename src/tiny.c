@@ -14,6 +14,9 @@
 #define MAXHOST 100
 #define MAXPORT 100
 
+#define BASEDIR "./wwwroot"
+#define DEFAULT_FILENAME "index.html"
+
 void readRequestHeaders(buffered_reader_t *pbr)
 {
     char headerLine[MAXLINE];
@@ -63,18 +66,23 @@ void errorResponse(int client, int statusCode, char *shortMessage, char *longMes
 
 int parseURI(char *uri, char *path, char *args)
 {
-    char *argsPos = strchr(uri, '?');
-    if (argsPos == NULL)
+    char *splitPos = strchr(uri, '?');
+    strcpy(path, BASEDIR);
+    if (splitPos == NULL)
     {
-        strcpy(path, uri);
+        strcat(path, uri);
         strcpy(args, "");
     }
     else
     {
-        size_t pathLength = argsPos - uri;
-        strncpy(path, uri, pathLength);
-        path[pathLength] = '\0';
-        strcpy(args, argsPos + 1);
+        size_t pathLength = splitPos - uri;
+        strncat(path, uri, pathLength);
+        strcpy(args, splitPos + 1);
+    }
+    size_t len = strlen(path);
+    if (path[len - 1] == '/')
+    {
+        strcat(path, DEFAULT_FILENAME);
     }
     int isDynamic = strstr(path, "/cgi-bin/") != NULL;
     return isDynamic;
