@@ -61,6 +61,25 @@ void errorResponse(int client, int statusCode, char *shortMessage, char *longMes
     }
 }
 
+int parseURI(char *uri, char *path, char *args)
+{
+    char *argsPos = strchr(uri, '?');
+    if (argsPos == NULL)
+    {
+        strcpy(path, uri);
+        strcpy(args, "");
+    }
+    else
+    {
+        size_t pathLength = argsPos - uri;
+        strncpy(path, uri, pathLength);
+        path[pathLength] = '\0';
+        strcpy(args, argsPos + 1);
+    }
+    int isDynamic = strstr(path, "/cgi-bin/") != NULL;
+    return isDynamic;
+}
+
 void handleClient(int client)
 {
     char reqLine[MAXLINE];
@@ -77,9 +96,9 @@ void handleClient(int client)
         printf("client closed connection\n");
         return;
     }
-    char method[MAXLINE], url[MAXLINE], version[MAXLINE];
-    sscanf(reqLine, "%s %s %s", method, url, version);
-    printf("Request - Method: %s URL: %s Version: %s\n", method, url, version);
+    char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+    sscanf(reqLine, "%s %s %s", method, uri, version);
+    printf("Request - Method: %s URL: %s Version: %s\n", method, uri, version);
     if (strcmp(version, "HTTP/1.1") != 0)
     {
         errorResponse(client, 505, "HTTP Version Not Supported", NULL);
@@ -91,7 +110,9 @@ void handleClient(int client)
         return;
     }
     readRequestHeaders(&br);
-    // parse URI
+    char path[MAXLINE], args[MAXLINE];
+    int isDynamic = parseURI(uri, path, args);
+    printf("isDynamic: %d path: %s args: %s\n", isDynamic, path, args);
     // serve static content
     // serve dynamic (CGI) content
     errorResponse(client, 501, "Not Implemented", "server under development");
