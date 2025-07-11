@@ -121,6 +121,10 @@ char *getMimeTypeString(char *path)
     {
         return "image/png";
     }
+    if (strcmp(extension, ".mp4") == 0)
+    {
+        return "video/mp4";
+    }
     return "text/plain";
 }
 
