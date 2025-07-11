@@ -122,24 +122,34 @@ char *getMimeTypeString(char *path)
     return "text/plain";
 }
 
-void serveStatic(int client, char *path)
+int checkResourcePermission(int client, char *path, mode_t flag)
 {
-    printf("serving static resource: %s\n", path);
     struct stat fileinfo;
     if (stat(path, &fileinfo) == -1)
     {
         if (errno == ENOENT)
         {
             errorResponse(client, 404, "Not Found", NULL);
-            return;
+            return -1;
         }
         perror("stat");
         errorResponse(client, 500, "Internal Server Error", NULL);
-        return;
+        return -1;
     }
-    if (!S_ISREG(fileinfo.st_mode) || (fileinfo.st_mode & S_IRUSR) == 0)
+    if (!S_ISREG(fileinfo.st_mode) || (fileinfo.st_mode & flag) == 0)
     {
         errorResponse(client, 403, "Forbidden", NULL);
+        return -1;
+    }
+    return 0;
+}
+
+void serveStatic(int client, char *path)
+{
+    printf("serving static resource: %s\n", path);
+    if (checkResourcePermission(client, path, S_IRUSR) != 0)
+    {
+        return;
     }
 
     FILE *file = fopen(path, "rb");
