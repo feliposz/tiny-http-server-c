@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <linux/stat.h>
@@ -127,6 +128,11 @@ void serveStatic(int client, char *path)
     struct stat fileinfo;
     if (stat(path, &fileinfo) == -1)
     {
+        if (errno == ENOENT)
+        {
+            errorResponse(client, 404, "Not Found", NULL);
+            return;
+        }
         perror("stat");
         errorResponse(client, 500, "Internal Server Error", NULL);
         return;
