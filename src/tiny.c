@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <linux/stat.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -16,6 +18,8 @@
 
 #define BASEDIR "./wwwroot"
 #define DEFAULT_FILENAME "index.html"
+
+int verbose = 0;
 
 void readRequestHeaders(buffered_reader_t *pbr)
 {
@@ -37,7 +41,10 @@ void readRequestHeaders(buffered_reader_t *pbr)
         {
             break;
         }
-        printf("Header #%d: %.*s", i, (int)length, headerLine);
+        if (verbose)
+        {
+            printf("Header #%d: %.*s", i, (int)length, headerLine);
+        }
     }
 }
 
@@ -88,6 +95,42 @@ int parseURI(char *uri, char *path, char *args)
     return isDynamic;
 }
 
+void serveStatic(int client, char *path)
+{
+    printf("serving static resource: %s\n", path);
+    struct stat fileinfo;
+    if (stat(path, &fileinfo) == -1)
+    {
+        perror("stat");
+        errorResponse(client, 500, "Internal Server Error", NULL);
+        return;
+    }
+    if (!S_ISREG(fileinfo.st_mode) || (fileinfo.st_mode & S_IRUSR) == 0)
+    {
+        errorResponse(client, 403, "Forbidden", NULL);
+    }
+
+    FILE *file = fopen(path, "rb");
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    char *content = malloc(size);
+    fread(content, size, 1, file);
+    fclose(file);
+
+    char buf[MAXLINE];
+    snprintf(buf, MAXLINE, "HTTP/1.1 200 OK\r\n");
+    sendBytes(client, buf, strlen(buf));
+    snprintf(buf, MAXLINE, "Content-Type: text/plain\r\n");
+    sendBytes(client, buf, strlen(buf));
+    snprintf(buf, MAXLINE, "Content-Length: %zu\r\n\r\n", size);
+    sendBytes(client, buf, strlen(buf));
+    sendBytes(client, content, size);
+    sendBytes(client, "\r\n", 2);
+
+    free(content);
+}
+
 void handleClient(int client)
 {
     char reqLine[MAXLINE];
@@ -106,7 +149,10 @@ void handleClient(int client)
     }
     char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     sscanf(reqLine, "%s %s %s", method, uri, version);
-    printf("Request - Method: %s URL: %s Version: %s\n", method, uri, version);
+    if (verbose)
+    {
+        printf("Request - Method: %s URL: %s Version: %s\n", method, uri, version);
+    }
     if (strcmp(version, "HTTP/1.1") != 0)
     {
         errorResponse(client, 505, "HTTP Version Not Supported", NULL);
@@ -120,10 +166,18 @@ void handleClient(int client)
     readRequestHeaders(&br);
     char path[MAXLINE], args[MAXLINE];
     int isDynamic = parseURI(uri, path, args);
-    printf("isDynamic: %d path: %s args: %s\n", isDynamic, path, args);
-    // serve static content
-    // serve dynamic (CGI) content
-    errorResponse(client, 501, "Not Implemented", "server under development");
+    if (verbose)
+    {
+        printf("isDynamic: %d path: %s args: %s\n", isDynamic, path, args);
+    }
+    if (!isDynamic)
+    {
+        serveStatic(client, path);
+    }
+    else
+    {
+        errorResponse(client, 501, "Not Implemented", "server under development");
+    }
 }
 
 int main(int argc, char *argv[])

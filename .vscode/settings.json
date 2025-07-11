@@ -1,5 +1,7 @@
 {
     "files.associations": {
-        "mynetlib.h": "c"
+        "mynetlib.h": "c",
+        "stat.h": "c",
+        "types.h": "c"
     }
 }
