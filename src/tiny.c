@@ -38,9 +38,21 @@ void readRequestHeaders(buffered_reader_t *pbr)
     }
 }
 
+void errorResponse(int client, int statusCode, char *shortMessage, char *longMessage)
+{
+    char buf[MAXLINE];
+    snprintf(buf, MAXLINE, "HTTP/1.1 %d %s\r\n", statusCode, shortMessage);
+    sendBytes(client, buf, strlen(buf));
+    snprintf(buf, MAXLINE, "Content-Type: text/plain\r\n");
+    sendBytes(client, buf, strlen(buf));
+    snprintf(buf, MAXLINE, "Content-Length: %zu\r\n", strlen(longMessage));
+    sendBytes(client, buf, strlen(buf));
+    sendBytes(client, longMessage, strlen(longMessage));
+}
+
 void handleClient(int client)
 {
-    char reqLine[MAXLINE], method[MAXLINE], url[MAXLINE], version[MAXLINE];
+    char reqLine[MAXLINE];
     buffered_reader_t br;
     bufReaderInit(&br, client);
     ssize_t reqLineLength = bufReadLine(&br, reqLine, MAXLINE);
@@ -54,9 +66,16 @@ void handleClient(int client)
         printf("client closed connection\n");
         return;
     }
+    char method[MAXLINE], url[MAXLINE], version[MAXLINE];
     sscanf(reqLine, "%s %s %s", method, url, version);
     printf("Request - Method: %s URL: %s Version: %s\n", method, url, version);
+    // check version
+    // check method
     readRequestHeaders(&br);
+    // parse URI
+    // serve static content
+    // serve dynamic (CGI) content
+    errorResponse(client, 501, "Not Implemented", "server under development");
 }
 
 int main(int argc, char *argv[])
