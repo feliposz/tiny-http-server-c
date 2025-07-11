@@ -45,9 +45,20 @@ void errorResponse(int client, int statusCode, char *shortMessage, char *longMes
     sendBytes(client, buf, strlen(buf));
     snprintf(buf, MAXLINE, "Content-Type: text/plain\r\n");
     sendBytes(client, buf, strlen(buf));
-    snprintf(buf, MAXLINE, "Content-Length: %zu\r\n", strlen(longMessage));
-    sendBytes(client, buf, strlen(buf));
-    sendBytes(client, longMessage, strlen(longMessage));
+    if (longMessage != NULL)
+    {
+        snprintf(buf, MAXLINE, "Content-Length: %zu\r\n", strlen(longMessage));
+        sendBytes(client, buf, strlen(buf));
+        sendBytes(client, longMessage, strlen(longMessage));
+    }
+    else
+    {
+        char defaultMessage[MAXLINE];
+        snprintf(defaultMessage, MAXLINE, "%d %s", statusCode, shortMessage);
+        snprintf(buf, MAXLINE, "Content-Length: %zu\r\n", strlen(defaultMessage));
+        sendBytes(client, buf, strlen(buf));
+        sendBytes(client, defaultMessage, strlen(defaultMessage));
+    }
 }
 
 void handleClient(int client)
@@ -69,8 +80,16 @@ void handleClient(int client)
     char method[MAXLINE], url[MAXLINE], version[MAXLINE];
     sscanf(reqLine, "%s %s %s", method, url, version);
     printf("Request - Method: %s URL: %s Version: %s\n", method, url, version);
-    // check version
-    // check method
+    if (strcmp(version, "HTTP/1.1") != 0)
+    {
+        errorResponse(client, 505, "HTTP Version Not Supported", NULL);
+        return;
+    }
+    if (strcmp(method, "GET") != 0)
+    {
+        errorResponse(client, 501, "Not Implemented", NULL);
+        return;
+    }
     readRequestHeaders(&br);
     // parse URI
     // serve static content
