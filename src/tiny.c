@@ -95,6 +95,32 @@ int parseURI(char *uri, char *path, char *args)
     return isDynamic;
 }
 
+char *getMimeTypeString(char *path)
+{
+    char *extension = strrchr(path, '.');
+    if (extension == NULL)
+    {
+        return "text/plain";
+    }
+    if (strcmp(extension, ".html") == 0 || strcmp(extension, ".htm") == 0)
+    {
+        return "text/html";
+    }
+    if (strcmp(extension, ".jpeg") == 0 || strcmp(extension, ".jpg") == 0)
+    {
+        return "image/jpeg";
+    }
+    if (strcmp(extension, ".gif") == 0)
+    {
+        return "image/gif";
+    }
+    if (strcmp(extension, ".png") == 0)
+    {
+        return "image/png";
+    }
+    return "text/plain";
+}
+
 void serveStatic(int client, char *path)
 {
     printf("serving static resource: %s\n", path);
@@ -121,7 +147,7 @@ void serveStatic(int client, char *path)
     char buf[MAXLINE];
     snprintf(buf, MAXLINE, "HTTP/1.1 200 OK\r\n");
     sendBytes(client, buf, strlen(buf));
-    snprintf(buf, MAXLINE, "Content-Type: text/plain\r\n");
+    snprintf(buf, MAXLINE, "Content-Type: %s\r\n", getMimeTypeString(path));
     sendBytes(client, buf, strlen(buf));
     snprintf(buf, MAXLINE, "Content-Length: %zu\r\n\r\n", size);
     sendBytes(client, buf, strlen(buf));
