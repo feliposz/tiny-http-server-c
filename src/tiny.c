@@ -350,15 +350,25 @@ void handleClient(int client)
     else
     {
         char *inputBuffer = NULL;
-        printf("contentLength=%ld\n", contentLength);
-        printf("contentType=%s\n", contentType);
         if (strcmp(method, "POST") == 0 && contentLength > 0)
         {
+            if (verbose)
+            {
+                printf("contentLength=%ld\n", contentLength);
+                printf("contentType=%s\n", contentType);
+            }
             inputBuffer = malloc(contentLength);
-            printf("bufReadBytes into %p\n", inputBuffer);
+            if (inputBuffer == NULL)
+            {
+                perror("malloc");
+                errorResponse(client, 500, "Internal Server Error", NULL);
+                return;
+            }
             if (bufReadBytes(&br, inputBuffer, contentLength) == -1)
             {
                 perror("bufReadBytes");
+                errorResponse(client, 500, "Internal Server Error", NULL);
+                return;
             }
         }
         serveDynamic(client, path, args, method, contentLength, contentType, inputBuffer);
