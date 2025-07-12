@@ -1,11 +1,12 @@
 // tiny.c - A very simple HTTP server
 
-#define _POSIX_C_SOURCE 200112L
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <linux/stat.h>
 #include <sys/types.h>
@@ -208,27 +209,10 @@ void serveDynamic(int client, char *path, char *args)
         perror("fork"); // shouldn't return
         return;
     }
-    else
+    else // parent
     {
-        int status;
-        if (waitpid(pid, &status, 0) < 0)
-        {
-            perror("waitpid");
-            errorResponse(client, 500, "Internal Server Error", NULL);
-            return;
-        }
-        if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
-        {
-            printf("exit status=%d\n", WEXITSTATUS(status));
-            errorResponse(client, 500, "Internal Server Error", NULL);
-            return;
-        }
-        if (WIFSIGNALED(status))
-        {
-            printf("terminated by signal=%d\n", WTERMSIG(status));
-            errorResponse(client, 500, "Internal Server Error", NULL);
-            return;
-        }
+        close(client); // avoid leaking resources
+        printf("spawned child process pid=%d\n", pid);
     }
 }
 
@@ -281,6 +265,40 @@ void handleClient(int client)
     }
 }
 
+void sigchldHandler(int sig)
+{
+    pid_t pid;
+    int status;
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0)
+    {
+        if (WIFEXITED(status))
+        {
+            printf("child pid=%d exit status=%d\n", pid, WEXITSTATUS(status));
+            return;
+        }
+        if (WIFSIGNALED(status))
+        {
+            printf("child pid=%d terminated by signal=%d\n", pid, WTERMSIG(status));
+            return;
+        }
+    }
+}
+
+typedef void handler_t(int);
+
+handler_t *Signal(int signum, handler_t *handler)
+{
+    struct sigaction action, old_action;
+
+    action.sa_handler = handler;
+    sigemptyset(&action.sa_mask); /* block sigs of type being handled */
+    action.sa_flags = SA_RESTART; /* restart syscalls if possible */
+
+    if (sigaction(signum, &action, &old_action) < 0)
+        perror("sigaction");
+    return (old_action.sa_handler);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -297,6 +315,8 @@ int main(int argc, char *argv[])
         fprintf(stderr, "cant't listen on port %s\n", port);
         exit(EXIT_FAILURE);
     }
+
+    Signal(SIGCHLD, sigchldHandler);
 
     char clientHost[MAXHOST];
     char clientPort[MAXPORT];

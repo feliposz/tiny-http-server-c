@@ -3,6 +3,7 @@
         "mynetlib.h": "c",
         "stat.h": "c",
         "types.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "sigaction.h": "c"
     }
 }
