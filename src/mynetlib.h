@@ -25,5 +25,6 @@ ssize_t receiveBytes(int socket, void *buf, size_t count);
 void bufReaderInit(buffered_reader_t *br, int socket);
 int bufFill(buffered_reader_t *br);
 ssize_t bufReadLine(buffered_reader_t *br, void *buf, size_t count);
+ssize_t bufReadBytes(buffered_reader_t *br, void *buf, size_t count);
 
 #endif

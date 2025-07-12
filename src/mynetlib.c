@@ -185,3 +185,27 @@ ssize_t bufReadLine(buffered_reader_t *br, void *buf, size_t count)
     }
     return count - remaining;
 }
+
+// Reads up to 'count' bytes from internal buffer and writes it into user buffer.
+// Returns total bytes read or -1 on error.
+ssize_t bufReadBytes(buffered_reader_t *br, void *buf, size_t count)
+{
+    size_t remaining = count;
+    char *writeOffset = buf;
+    while (remaining > 0)
+    {
+        if (br->availableBytes == 0)
+        {
+            size_t result;
+            if ((result = bufFill(br)) <= 0)
+                return result;
+        }
+        size_t bytesToCopy = remaining < br->availableBytes ? remaining : br->availableBytes;
+        memcpy(writeOffset, br->currOffset, bytesToCopy);
+        br->currOffset += bytesToCopy;
+        writeOffset += bytesToCopy;
+        br->availableBytes -= bytesToCopy;
+        remaining -= bytesToCopy;
+    }
+    return count - remaining;
+}
