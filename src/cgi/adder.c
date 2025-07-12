@@ -6,7 +6,8 @@
 
 int main(void)
 {
-    char contentOutput[MAXLINE], postInput[MAXLINE];
+    char contentOutput[MAXLINE];
+    char *postInput = NULL;
     int a = 0, b = 0;
 
     char *queryString = getenv("QUERY_STRING");
@@ -25,9 +26,16 @@ int main(void)
         }
         else if (strcmp(method, "POST") == 0)
         {
-            // NOTE: in a more reallistic setting, should dynamically allocate buffer and free accordingly
-            fgets(postInput, sizeof(postInput), stdin);
-            input = postInput;
+            char *contentLengthString = getenv("CONTENT_LENGTH");
+            long contentLength = atol(contentLengthString);
+            if (contentLength > 0)
+            {
+                postInput = malloc(contentLength);
+                if (postInput != NULL && fread(postInput, contentLength, 1, stdin) != contentLength)
+                {
+                    input = postInput;
+                }
+            }
         }
     }
     if (input != NULL)
@@ -43,6 +51,6 @@ int main(void)
     printf("Content-type: text/plain\r\n\r\n");
     printf("%s", contentOutput);
     fflush(stdout);
-
+    free(postInput);
     return 0;
 }
