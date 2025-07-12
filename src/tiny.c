@@ -23,7 +23,7 @@
 #define DEFAULT_FILENAME "index.html"
 
 extern char **environ;
-int verbose = 0;
+int verbose = 0; // TODO: add command line flag
 
 long readRequestHeaders(buffered_reader_t *pbr, char *contentType, size_t contentTypeSize)
 {
@@ -94,6 +94,8 @@ void errorResponse(int client, int statusCode, char *shortMessage, char *longMes
 int parseURI(char *uri, char *path, char *args)
 {
     char *splitPos = strchr(uri, '?');
+    // TODO: check path traversal (../) with realpath
+    // TODO: use snprintf where possible
     strcpy(path, BASEDIR);
     if (splitPos == NULL)
     {
@@ -203,6 +205,7 @@ void serveStatic(int client, char *path)
         return;
     }
 
+    // TODO: handle large files by reading in blocks
     FILE *file = fopen(path, "rb");
     char *content = malloc(size);
     fread(content, size, 1, file);
@@ -216,7 +219,6 @@ void serveStatic(int client, char *path)
     snprintf(buf, MAXLINE, "Content-Length: %zu\r\n\r\n", size);
     sendBytes(client, buf, strlen(buf));
     sendBytes(client, content, size);
-    sendBytes(client, "\r\n", 2);
 
     free(content);
 }
@@ -232,7 +234,7 @@ void serveDynamic(int client, char *path, char *args, char *method, long inputLe
     // set a pipe to allow for input redirection (stdin) to child process
     // parent will write the buffered input to it
     int pipefd[2] = {-1, -1};
-    if (inputLength > 0)
+    if (inputLength > 0 && inputBuffer != NULL)
     {
         if (verbose)
         {
@@ -290,6 +292,7 @@ void serveDynamic(int client, char *path, char *args, char *method, long inputLe
                 printf("writing to %d\n", pipefd[1]);
             if (sendBytes(pipefd[1], inputBuffer, inputLength) == -1)
             {
+                // TODO: kill child and return error to client
                 perror("sendBytes");
             }
             close(pipefd[1]);
@@ -446,8 +449,8 @@ int main(int argc, char *argv[])
             perror("accept");
             continue;
         }
-        int result;
-        if ((result = getnameinfo((SA *)&address, addressLength, clientHost, MAXHOST, clientPort, MAXPORT, NI_NUMERICSERV)) != 0)
+        int result = getnameinfo((SA *)&address, addressLength, clientHost, MAXHOST, clientPort, MAXPORT, NI_NUMERICSERV);
+        if (result != 0)
         {
             fprintf(stderr, "error getting name information: %s\n", gai_strerror(result));
         }

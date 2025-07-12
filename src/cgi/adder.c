@@ -31,7 +31,7 @@ int main(void)
             if (contentLength > 0)
             {
                 postInput = malloc(contentLength);
-                if (postInput != NULL && fread(postInput, contentLength, 1, stdin) != contentLength)
+                if (postInput != NULL && fread(postInput, contentLength, 1, stdin) == 1)
                 {
                     input = postInput;
                 }
@@ -40,6 +40,7 @@ int main(void)
     }
     if (input != NULL)
     {
+        // TODO: properly split arguments (strtok_r) and key/values accordingly
         // super lazy way to do this... it's just for testing! :P
         sscanf(input, "a=%d&b=%d", &a, &b);
     }
