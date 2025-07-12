@@ -129,7 +129,7 @@ char *getMimeTypeString(char *path)
     return "text/plain";
 }
 
-int checkResourcePermission(int client, char *path, mode_t flag)
+int checkResource(int client, char *path, mode_t flag, long *psize)
 {
     struct stat fileinfo;
     if (stat(path, &fileinfo) == -1)
@@ -148,21 +148,46 @@ int checkResourcePermission(int client, char *path, mode_t flag)
         errorResponse(client, 403, "Forbidden", NULL);
         return -1;
     }
+    if (psize != NULL)
+    {
+        *psize = fileinfo.st_size;
+    }
     return 0;
+}
+
+void serveHeadRequest(int client, char *path, int isDynamic)
+{
+    printf("serving head request: %s\n", path);
+    long size;
+    if (checkResource(client, path, S_IRUSR, &size) != 0)
+    {
+        return;
+    }
+    char buf[MAXLINE];
+    snprintf(buf, MAXLINE, "HTTP/1.1 200 OK\r\n");
+    sendBytes(client, buf, strlen(buf));
+    if (isDynamic)
+    {
+        // unknown size: payload headers may be omitted according to RFC 7231
+        sendBytes(client, "\r\n", 2);
+        return;
+    }
+    snprintf(buf, MAXLINE, "Content-Type: %s\r\n", getMimeTypeString(path));
+    sendBytes(client, buf, strlen(buf));
+    snprintf(buf, MAXLINE, "Content-Length: %zu\r\n\r\n", size);
+    sendBytes(client, buf, strlen(buf));
 }
 
 void serveStatic(int client, char *path)
 {
     printf("serving static resource: %s\n", path);
-    if (checkResourcePermission(client, path, S_IRUSR) != 0)
+    long size;
+    if (checkResource(client, path, S_IRUSR, &size) != 0)
     {
         return;
     }
 
     FILE *file = fopen(path, "rb");
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
     char *content = malloc(size);
     fread(content, size, 1, file);
     fclose(file);
@@ -183,7 +208,7 @@ void serveStatic(int client, char *path)
 void serveDynamic(int client, char *path, char *args)
 {
     printf("serving dynamic resource: %s with args: %s\n", path, args);
-    if (checkResourcePermission(client, path, S_IXUSR) != 0)
+    if (checkResource(client, path, S_IXUSR, NULL) != 0)
     {
         return;
     }
@@ -243,7 +268,7 @@ void handleClient(int client)
         errorResponse(client, 505, "HTTP Version Not Supported", NULL);
         return;
     }
-    if (strcmp(method, "GET") != 0)
+    if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0)
     {
         errorResponse(client, 501, "Not Implemented", NULL);
         return;
@@ -255,7 +280,11 @@ void handleClient(int client)
     {
         printf("isDynamic: %d path: %s args: %s\n", isDynamic, path, args);
     }
-    if (!isDynamic)
+    if (strcmp(method, "HEAD") == 0)
+    {
+        serveHeadRequest(client, path, isDynamic);
+    }
+    else if (!isDynamic)
     {
         serveStatic(client, path);
     }
