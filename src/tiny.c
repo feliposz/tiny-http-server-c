@@ -25,31 +25,47 @@
 extern char **environ;
 int verbose = 0;
 
-void readRequestHeaders(buffered_reader_t *pbr)
+long readRequestHeaders(buffered_reader_t *pbr, char *contentType, size_t contentTypeSize)
 {
+    long contentLength = 0;
     char headerLine[MAXLINE];
     for (int i = 0;; i++)
     {
-        ssize_t length = bufReadLine(pbr, headerLine, MAXLINE);
-        if (length == -1)
+        ssize_t headerLength = bufReadLine(pbr, headerLine, MAXLINE);
+        if (headerLength == -1)
         {
             perror("bufReadLine");
             break;
         }
-        else if (length == 0)
+        else if (headerLength == 0)
         {
             printf("client closed connection\n");
             break;
         }
-        if (strncmp(headerLine, "\r\n", length) == 0)
+        if (strncmp(headerLine, "\r\n", headerLength) == 0)
         {
             break;
         }
         if (verbose)
         {
-            printf("Header #%d: %.*s", i, (int)length, headerLine);
+            printf("Header #%d: %.*s", i, (int)headerLength, headerLine);
+        }
+        if (strncasecmp(headerLine, "Content-Length:", 15) == 0)
+        {
+            char *split = strchr(headerLine, ':');
+            contentLength = atol(split + 1);
+        }
+        if (strncasecmp(headerLine, "Content-Type:", 13) == 0)
+        {
+            char *split = strchr(headerLine, ':');
+            split++;              // skip ':'
+            while (*split == ' ') // skip whitespaces
+                split++;
+            size_t actualSize = headerLength - (split - headerLine) - 2; // -2 for CRLF
+            snprintf(contentType, contentTypeSize, "%.*s", (int)actualSize, split);
         }
     }
+    return contentLength;
 }
 
 void errorResponse(int client, int statusCode, char *shortMessage, char *longMessage)
@@ -205,12 +221,24 @@ void serveStatic(int client, char *path)
     free(content);
 }
 
-void serveDynamic(int client, char *path, char *args)
+void serveDynamic(int client, char *path, char *args, char *method, long inputLength, char *inputType, char *inputBuffer)
 {
     printf("serving dynamic resource: %s with args: %s\n", path, args);
     if (checkResource(client, path, S_IXUSR, NULL) != 0)
     {
         return;
+    }
+
+    // set a pipe to allow for input redirection (stdin) to child process
+    // parent will write the buffered input to it
+    int pipefd[2] = {-1, -1};
+    if (inputLength > 0)
+    {
+        if (verbose)
+        {
+            printf("input (%ld length): %.*s\n", inputLength, (int)inputLength, inputBuffer);
+        }
+        pipe(pipefd);
     }
 
     pid_t pid = fork();
@@ -228,15 +256,44 @@ void serveDynamic(int client, char *path, char *args)
     if (pid == 0) // child
     {
         char *empty[] = {NULL};
+        if (pipefd[1] != -1)
+        {
+            close(pipefd[1]); // child doesn't need the write end of the pipe
+        }
+        if (pipefd[0] != -1)
+        {
+            if (verbose)
+                printf("redirecting stdin to %d\n", pipefd[0]);
+            dup2(pipefd[0], STDIN_FILENO);
+            close(pipefd[0]);
+        }
         dup2(client, STDOUT_FILENO);
         setenv("QUERY_STRING", args, 1);
+        setenv("REQUEST_METHOD", method, 1);
+        char inputLengthString[20];
+        sprintf(inputLengthString, "%ld", inputLength);
+        setenv("CONTENT_LENGTH", inputLengthString, 1);
+        setenv("CONTENT_TYPE", inputType, 1);
         execve(path, empty, environ);
-        perror("fork"); // shouldn't return
+        perror("execve"); // shouldn't return
         return;
     }
     else // parent
     {
-        close(client); // avoid leaking resources
+        if (pipefd[0] != -1)
+        {
+            close(pipefd[0]); // parent doesn't need the read end of the pipe
+        }
+        if (pipefd[1] != -1)
+        {
+            if (verbose)
+                printf("writing to %d\n", pipefd[1]);
+            if (sendBytes(pipefd[1], inputBuffer, inputLength) == -1)
+            {
+                perror("sendBytes");
+            }
+            close(pipefd[1]);
+        }
         printf("spawned child process pid=%d\n", pid);
     }
 }
@@ -268,12 +325,14 @@ void handleClient(int client)
         errorResponse(client, 505, "HTTP Version Not Supported", NULL);
         return;
     }
-    if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0)
+    if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0 && strcmp(method, "POST") != 0)
     {
         errorResponse(client, 501, "Not Implemented", NULL);
         return;
     }
-    readRequestHeaders(&br);
+    char contentType[MAXLINE];
+    strcpy(contentType, "");
+    long contentLength = readRequestHeaders(&br, contentType, sizeof(contentType));
     char path[MAXLINE], args[MAXLINE];
     int isDynamic = parseURI(uri, path, args);
     if (verbose)
@@ -290,7 +349,20 @@ void handleClient(int client)
     }
     else
     {
-        serveDynamic(client, path, args);
+        char *inputBuffer = NULL;
+        printf("contentLength=%ld\n", contentLength);
+        printf("contentType=%s\n", contentType);
+        if (strcmp(method, "POST") == 0 && contentLength > 0)
+        {
+            inputBuffer = malloc(contentLength);
+            printf("bufReadBytes into %p\n", inputBuffer);
+            if (bufReadBytes(&br, inputBuffer, contentLength) == -1)
+            {
+                perror("bufReadBytes");
+            }
+        }
+        serveDynamic(client, path, args, method, contentLength, contentType, inputBuffer);
+        free(inputBuffer);
     }
 }
 
