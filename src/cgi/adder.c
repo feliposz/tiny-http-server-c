@@ -13,9 +13,7 @@ int main(void)
     if (queryString != NULL)
     {
         // super lazy way to do this... it's just for testing! :P
-        char *split = strchr(queryString, '&');
-        a = atoi(queryString);
-        b = atoi(split + 1);
+        sscanf(queryString, "a=%d&b=%d", &a, &b);
     }
 
     sprintf(content, "%d + %d = %d", a, b, a + b);
