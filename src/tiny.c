@@ -347,6 +347,9 @@ int main(int argc, char *argv[])
 
     Signal(SIGCHLD, sigchldHandler);
 
+    // avoid crashing the server if trying to write to client that prematurely closed the connection
+    Signal(SIGPIPE, SIG_IGN);
+
     char clientHost[MAXHOST];
     char clientPort[MAXPORT];
 
