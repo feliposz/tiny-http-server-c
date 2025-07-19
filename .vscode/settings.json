@@ -4,6 +4,7 @@
         "stat.h": "c",
         "types.h": "c",
         "stdio.h": "c",
-        "sigaction.h": "c"
+        "sigaction.h": "c",
+        "netdb.h": "c"
     }
 }

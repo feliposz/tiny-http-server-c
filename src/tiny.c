@@ -1,4 +1,5 @@
 // tiny.c - A very simple HTTP server
+// Note: This version implements concurrency spawning a new POSIX thread for each request.
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netdb.h>
+#include <pthread.h>
 #include "mynetlib.h"
 
 #define MAXLINE 1024
@@ -379,6 +381,19 @@ void handleClient(int client)
     }
 }
 
+void *handleClientThread(void *vargp)
+{
+    int client = *(int *)vargp;
+    free(vargp);
+    pthread_detach(pthread_self());
+    int tid = gettid();
+    printf("beginning thread %d to handle client %d\n", tid, client);
+    handleClient(client);
+    close(client);
+    printf("exiting thread %d that handled client %d\n", tid, client);
+    pthread_exit(NULL);
+}
+
 void sigchldHandler(int sig)
 {
     pid_t pid;
@@ -458,8 +473,15 @@ int main(int argc, char *argv[])
         {
             printf("client connected %s:%s\n", clientHost, clientPort);
         }
-        handleClient(client);
-        close(client);
+        pthread_t tid;
+        int *pclient = malloc(sizeof(int));
+        *pclient = client;
+        result = pthread_create(&tid, NULL, handleClientThread, pclient);
+        if (result != 0)
+        {
+            perror("pthread_create");
+            close(client);
+        }
     }
 
     // unreachable
