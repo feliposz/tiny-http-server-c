@@ -469,6 +469,7 @@ int main(int argc, char *argv[])
         {
             close(listenSocket); // not needed on child
             handleClient(client);
+            close(client);
             exit(EXIT_SUCCESS);
         }
         else
