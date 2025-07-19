@@ -1,4 +1,5 @@
 // tiny.c - A very simple HTTP server
+// This version implements concurrency by I/O multiplexing (select)
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -413,6 +414,87 @@ handler_t *Signal(int signum, handler_t *handler)
     return (old_action.sa_handler);
 }
 
+typedef struct
+{
+    fd_set readableSet;
+    fd_set readyForReadingSet;
+    int readyCount;
+    int minFileDescriptor;
+    int maxFileDescriptor;
+    int fileDescriptors[FD_SETSIZE];
+    buffered_reader_t readers[FD_SETSIZE];
+} pool_t;
+
+void initPool(pool_t *pool, int listenSocket)
+{
+    pool->minFileDescriptor = listenSocket;
+    pool->maxFileDescriptor = listenSocket;
+    FD_ZERO(&pool->readableSet);
+    FD_SET(listenSocket, &pool->readableSet);
+    for (int i = 0; i < FD_SETSIZE; i++)
+    {
+        pool->fileDescriptors[i] = -1;
+    }
+}
+
+// add client to the pool
+// returns 1 if successful, else 0
+int addClient(pool_t *pool, int client)
+{
+    for (int i = 0; i < FD_SETSIZE; i++)
+    {
+        if (pool->fileDescriptors[i] == -1)
+        {
+            FD_SET(client, &pool->readableSet);
+            pool->fileDescriptors[i] = client;
+            bufReaderInit(&pool->readers[i], client);
+            if (pool->maxFileDescriptor < client)
+            {
+                pool->maxFileDescriptor = client;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void removeClient(pool_t *pool, int index)
+{
+    int client = pool->fileDescriptors[index];
+    pool->fileDescriptors[index] = -1;
+    FD_CLR(client, &pool->readableSet);
+    close(client);
+    if (client == pool->maxFileDescriptor)
+    {
+        int maxFD = -1;
+        for (int i = 0; i < FD_SETSIZE; i++)
+        {
+            if (maxFD < pool->fileDescriptors[i])
+            {
+                maxFD = pool->fileDescriptors[i];
+            }
+        }
+        pool->maxFileDescriptor = maxFD == -1 ? pool->minFileDescriptor : maxFD;
+    }
+}
+
+void checkClients(pool_t *pool)
+{
+    for (int i = 0; i < FD_SETSIZE && pool->readyCount > 0; i++)
+    {
+        int client = pool->fileDescriptors[i];
+        if (!FD_ISSET(client, &pool->readyForReadingSet))
+        {
+            continue;
+        }
+        printf("begin serving client %d\n", client);
+        handleClient(client);
+        removeClient(pool, i);
+        pool->readyCount--;
+        printf("end serving client %d\n", client);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -435,31 +517,52 @@ int main(int argc, char *argv[])
     // avoid crashing the server if trying to write to client that prematurely closed the connection
     Signal(SIGPIPE, SIG_IGN);
 
-    char clientHost[MAXHOST];
-    char clientPort[MAXPORT];
+    static pool_t pool;
+    initPool(&pool, listenSocket);
 
     printf("listening on port %s\n", port);
     while (1)
     {
-        struct sockaddr_storage address;
-        socklen_t addressLength = sizeof(address);
-        int client = accept(listenSocket, (SA *)&address, &addressLength);
-        if (client == -1)
+        pool.readyForReadingSet = pool.readableSet;
+        printf("waiting on FD - max: %d\n", pool.maxFileDescriptor);
+        pool.readyCount = select(pool.maxFileDescriptor + 1, &pool.readyForReadingSet, NULL, NULL, NULL);
+        if (pool.readyCount == -1)
         {
-            perror("accept");
+            perror("select");
             continue;
         }
-        int result = getnameinfo((SA *)&address, addressLength, clientHost, MAXHOST, clientPort, MAXPORT, NI_NUMERICSERV);
-        if (result != 0)
+        printf("pool.readyCount = %d\n", pool.readyCount);
+
+        if (FD_ISSET(listenSocket, &pool.readyForReadingSet))
         {
-            fprintf(stderr, "error getting name information: %s\n", gai_strerror(result));
+            struct sockaddr_storage address;
+            socklen_t addressLength = sizeof(address);
+            int client = accept(listenSocket, (SA *)&address, &addressLength);
+            if (client == -1)
+            {
+                perror("accept");
+            }
+            else
+            {
+                int result;
+                char clientHost[MAXHOST];
+                char clientPort[MAXPORT];
+                if ((result = getnameinfo((SA *)&address, addressLength, clientHost, MAXHOST, clientPort, MAXPORT, NI_NUMERICSERV)) != 0)
+                {
+                    fprintf(stderr, "error getting name information: %s\n", gai_strerror(result));
+                }
+                else
+                {
+                    printf("client %d connected %s:%s\n", client, clientHost, clientPort);
+                }
+                if (!addClient(&pool, client))
+                {
+                    close(client);
+                }
+            }
         }
-        else
-        {
-            printf("client connected %s:%s\n", clientHost, clientPort);
-        }
-        handleClient(client);
-        close(client);
+
+        checkClients(&pool);
     }
 
     // unreachable
