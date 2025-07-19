@@ -1,4 +1,5 @@
 // tiny.c - A very simple HTTP server
+// Note: This version implements concurrency by forking into child processes.
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -458,8 +459,23 @@ int main(int argc, char *argv[])
         {
             printf("client connected %s:%s\n", clientHost, clientPort);
         }
-        handleClient(client);
-        close(client);
+        pid_t pid = fork();
+        if (pid == -1)
+        {
+            perror("fork");
+            exit(EXIT_FAILURE);
+        }
+        else if (pid == 0)
+        {
+            close(listenSocket); // not needed on child
+            handleClient(client);
+            exit(EXIT_SUCCESS);
+        }
+        else
+        {
+            printf("spawned handler pid=%d\n", pid);
+            close(client);
+        }
     }
 
     // unreachable
