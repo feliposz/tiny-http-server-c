@@ -1,4 +1,8 @@
 // tiny.c - A very simple HTTP server
+// Note: this version uses a pre-threading concurrency model.
+// A number of worker threads are spawned while the main thread handles
+// the incoming clients and dispatches it to the workers
+// using a semaphore-controlled queue.
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -13,11 +17,15 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netdb.h>
+#include <pthread.h>
 #include "mynetlib.h"
+#include "mysemqueue.h"
 
 #define MAXLINE 1024
 #define MAXHOST 100
 #define MAXPORT 100
+#define NUM_WORKERS 4
+#define QUEUE_CAPACITY 32
 
 #define BASEDIR "./wwwroot"
 #define DEFAULT_FILENAME "index.html"
@@ -413,6 +421,20 @@ handler_t *Signal(int signum, handler_t *handler)
     return (old_action.sa_handler);
 }
 
+void *workerThread(void *vpqueue)
+{
+    queue_t *pqueue = (queue_t *)vpqueue;
+    pthread_detach(pthread_self());
+    while (1)
+    {
+        int client = queueRemove(pqueue);
+        printf("worker %d serving client %d\n", gettid(), client);
+        handleClient(client);
+        close(client);
+    }
+    pthread_exit(NULL);
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -422,6 +444,20 @@ int main(int argc, char *argv[])
     }
 
     char *port = argv[1];
+
+    queue_t queue;
+    queueInit(&queue, QUEUE_CAPACITY);
+
+    for (int i = 0; i < NUM_WORKERS; i++)
+    {
+        pthread_t tid;
+        int result = pthread_create(&tid, NULL, workerThread, &queue);
+        if (result != 0)
+        {
+            perror("[server] pthread_create");
+            exit(EXIT_FAILURE);
+        }
+    }
 
     int listenSocket = serverListen(port);
     if (listenSocket == -1)
@@ -458,11 +494,11 @@ int main(int argc, char *argv[])
         {
             printf("client connected %s:%s\n", clientHost, clientPort);
         }
-        handleClient(client);
-        close(client);
+        queueAdd(&queue, client);
     }
 
     // unreachable
+    queueFree(&queue);
     close(listenSocket);
     return 0;
 }

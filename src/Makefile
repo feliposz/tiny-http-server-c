@@ -6,8 +6,11 @@ all: tiny hello adder
 mynetlib.o: mynetlib.c mynetlib.h
 	$(CC) $(CFLAGS) -c mynetlib.c
 
-tiny: tiny.c mynetlib.o
-	$(CC) $(CFLAGS) -o tiny tiny.c mynetlib.o
+mysemqueue.o: mysemqueue.c mysemqueue.h
+	$(CC) $(CFLAGS) -c mysemqueue.c
+
+tiny: tiny.c mynetlib.o mysemqueue.o
+	$(CC) $(CFLAGS) -o tiny tiny.c mynetlib.o mysemqueue.o
 
 hello: cgi/hello.c
 	mkdir -p ../wwwroot/cgi-bin
