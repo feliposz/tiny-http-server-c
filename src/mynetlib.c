@@ -93,7 +93,10 @@ ssize_t sendBytes(int socket, void *buf, size_t count)
             }
             else
             {
-                perror("write");
+                if (errno != EPIPE)
+                {
+                    perror("write");
+                }
                 return -1;
             }
         }

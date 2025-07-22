@@ -24,8 +24,9 @@
 #define MAXLINE 1024
 #define MAXHOST 100
 #define MAXPORT 100
-#define NUM_WORKERS 4
-#define QUEUE_CAPACITY 32
+#define MIN_WORKERS 1
+#define MAX_WORKERS 32
+#define QUEUE_CAPACITY 64
 
 #define BASEDIR "./wwwroot"
 #define DEFAULT_FILENAME "index.html"
@@ -183,7 +184,8 @@ int checkResource(int client, char *path, mode_t flag, long *psize)
 
 void serveHeadRequest(int client, char *path, int isDynamic)
 {
-    printf("serving head request: %s\n", path);
+    if (verbose)
+        printf("serving head request: %s\n", path);
     long size;
     if (checkResource(client, path, S_IRUSR, &size) != 0)
     {
@@ -206,7 +208,8 @@ void serveHeadRequest(int client, char *path, int isDynamic)
 
 void serveStatic(int client, char *path)
 {
-    printf("serving static resource: %s\n", path);
+    if (verbose)
+        printf("serving static resource: %s\n", path);
     long size;
     if (checkResource(client, path, S_IRUSR, &size) != 0)
     {
@@ -233,7 +236,8 @@ void serveStatic(int client, char *path)
 
 void serveDynamic(int client, char *path, char *args, char *method, long inputLength, char *inputType, char *inputBuffer)
 {
-    printf("serving dynamic resource: %s with args: %s\n", path, args);
+    if (verbose)
+        printf("serving dynamic resource: %s with args: %s\n", path, args);
     if (checkResource(client, path, S_IXUSR, NULL) != 0)
     {
         return;
@@ -305,7 +309,8 @@ void serveDynamic(int client, char *path, char *args, char *method, long inputLe
             }
             close(pipefd[1]);
         }
-        printf("spawned child process pid=%d\n", pid);
+        if (verbose)
+            printf("spawned child process pid=%d\n", pid);
     }
 }
 
@@ -322,7 +327,8 @@ void handleClient(int client)
     }
     else if (reqLineLength == 0)
     {
-        printf("client closed connection\n");
+        if (verbose)
+            printf("client closed connection\n");
         return;
     }
     char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
@@ -393,15 +399,13 @@ void sigchldHandler(int sig)
     int status;
     while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0)
     {
-        if (WIFEXITED(status))
+        if (WIFEXITED(status) && verbose)
         {
             printf("child pid=%d exit status=%d\n", pid, WEXITSTATUS(status));
-            return;
         }
-        if (WIFSIGNALED(status))
+        if (WIFSIGNALED(status) && verbose)
         {
             printf("child pid=%d terminated by signal=%d\n", pid, WTERMSIG(status));
-            return;
         }
     }
 }
@@ -421,18 +425,76 @@ handler_t *Signal(int signum, handler_t *handler)
     return (old_action.sa_handler);
 }
 
+typedef struct
+{
+    sem_t mutex;
+    int busy;
+    int spawned;
+    int minWorkers;
+    int maxWorkers;
+    queue_t *pqueue;
+} worker_control_t;
+
+worker_control_t workerControl;
+
 void *workerThread(void *vpqueue)
 {
     queue_t *pqueue = (queue_t *)vpqueue;
     pthread_detach(pthread_self());
-    while (1)
+    int shouldRetire = 0;
+    printf("worker %d beginning service\n", gettid());
+    while (!shouldRetire)
     {
         int client = queueRemove(pqueue);
+
+        sem_wait(&workerControl.mutex);
         printf("worker %d serving client %d\n", gettid(), client);
+        workerControl.busy++;
+        sem_post(&workerControl.mutex);
+
         handleClient(client);
+
+        sem_wait(&workerControl.mutex);
+        workerControl.busy--;
         close(client);
+        if (workerControl.busy == 0 && workerControl.spawned > workerControl.minWorkers)
+        {
+            workerControl.spawned--;
+            shouldRetire = 1;
+            printf("worker %d retiring (current: %d)\n", gettid(), workerControl.spawned);
+        }
+        sem_post(&workerControl.mutex);
     }
     pthread_exit(NULL);
+}
+
+void workerSpawn()
+{
+    workerControl.spawned++;
+    pthread_t tid;
+    int result = pthread_create(&tid, NULL, workerThread, workerControl.pqueue);
+    if (result != 0)
+    {
+        perror("[server] pthread_create");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void initWorkerControl(queue_t *pqueue)
+{
+    sem_init(&workerControl.mutex, 0, 1);
+    workerControl.busy = 0;
+    workerControl.spawned = 0;
+    workerControl.minWorkers = MIN_WORKERS;
+    workerControl.maxWorkers = MAX_WORKERS;
+    workerControl.pqueue = pqueue;
+
+    sem_wait(&workerControl.mutex);
+    for (int i = 0; i < workerControl.minWorkers; i++)
+    {
+        workerSpawn();
+    }
+    sem_post(&workerControl.mutex);
 }
 
 int main(int argc, char *argv[])
@@ -448,16 +510,7 @@ int main(int argc, char *argv[])
     queue_t queue;
     queueInit(&queue, QUEUE_CAPACITY);
 
-    for (int i = 0; i < NUM_WORKERS; i++)
-    {
-        pthread_t tid;
-        int result = pthread_create(&tid, NULL, workerThread, &queue);
-        if (result != 0)
-        {
-            perror("[server] pthread_create");
-            exit(EXIT_FAILURE);
-        }
-    }
+    initWorkerControl(&queue);
 
     int listenSocket = serverListen(port);
     if (listenSocket == -1)
@@ -485,16 +538,26 @@ int main(int argc, char *argv[])
             perror("accept");
             continue;
         }
-        int result = getnameinfo((SA *)&address, addressLength, clientHost, MAXHOST, clientPort, MAXPORT, NI_NUMERICSERV);
-        if (result != 0)
+        if (verbose)
         {
-            fprintf(stderr, "error getting name information: %s\n", gai_strerror(result));
+            int result = getnameinfo((SA *)&address, addressLength, clientHost, MAXHOST, clientPort, MAXPORT, NI_NUMERICSERV);
+            if (result != 0)
+            {
+                fprintf(stderr, "error getting name information: %s\n", gai_strerror(result));
+            }
+            else
+            {
+                printf("client connected %s:%s\n", clientHost, clientPort);
+            }
         }
-        else
+        sem_wait(&workerControl.mutex);
+        if (workerControl.busy == workerControl.spawned && workerControl.spawned < workerControl.maxWorkers)
         {
-            printf("client connected %s:%s\n", clientHost, clientPort);
+            workerSpawn();
         }
+        sem_post(&workerControl.mutex);
         queueAdd(&queue, client);
+        fflush(stdout);
     }
 
     // unreachable
