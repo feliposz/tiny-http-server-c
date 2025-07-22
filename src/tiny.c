@@ -388,12 +388,10 @@ void sigchldHandler(int sig)
         if (WIFEXITED(status))
         {
             printf("child pid=%d exit status=%d\n", pid, WEXITSTATUS(status));
-            return;
         }
         if (WIFSIGNALED(status))
         {
             printf("child pid=%d terminated by signal=%d\n", pid, WTERMSIG(status));
-            return;
         }
     }
 }
